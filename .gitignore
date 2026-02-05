@@ -1,0 +1,24 @@
+# ----- Go -----
+# Binaries
+weather
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage
+*.out
+
+# ----- OS -----
+.DS_Store
+
+# ----- Editor -----
+.vscode/
+
+# ----- Logs / Temp -----
+*.log
+tmp/
