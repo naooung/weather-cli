@@ -22,3 +22,6 @@ weather
 # ----- Logs / Temp -----
 *.log
 tmp/
+
+# ----- Env -----
+.env
