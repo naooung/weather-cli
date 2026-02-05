@@ -29,24 +29,22 @@ type OpenMeteoResponse struct {
 type Current struct {
 	Temperature2m       float64 `json:"temperature_2m"`
 	ApparentTemperature float64 `json:"apparent_temperature"`
-	RelativeHumidity2m  int     `json:"relative_humidity_2m"`
 	PrecipProbability   int     `json:"precipitation_probability"`
-	WindSpeed10m        float64 `json:"wind_speed_10m"`
 	WeatherCode         int     `json:"weather_code"`
 }
 
-// ---------- Air Quality ----------
+// ---------- Open-Meteo: Air Quality ----------
 type AirQualityResponse struct {
 	Current AirQualityCurrent `json:"current"`
 }
 
 type AirQualityCurrent struct {
-	PM10  float64 `json:"pm10"`
-	PM25  float64 `json:"pm2_5"`
+	PM10  float64 `json:"pm10"`  // 미세먼지
+	PM25  float64 `json:"pm2_5"` // 초미세먼지
 	AQIUS int     `json:"us_aqi"`
 }
 
-// RunNow: city -> lat/lon -> weather -> print
+// RunNow: city -> lat/lon -> weather + air -> print
 func RunNow(city string) error {
 	client := &http.Client{Timeout: 8 * time.Second}
 
@@ -65,29 +63,38 @@ func RunNow(city string) error {
 		return err
 	}
 
-	now := time.Now().In(time.FixedZone("KST", 9*60*60))
-
-	fmt.Printf("%s, %s | %s (KST)\n", loc.Name, loc.Country, now.Format("2006-01-02 15:04"))
-	fmt.Printf("%s  %.1f°C (체감 %.1f°C)\n",
-		iconForCode(w.WeatherCode),
-		w.Temperature2m,
-		w.ApparentTemperature,
-	)
-	fmt.Printf("강수확률 %d%% | 습도 %d%% | 바람 %.1f m/s\n",
-		w.PrecipProbability,
-		w.RelativeHumidity2m,
-		w.WindSpeed10m,
-	)
-	fmt.Printf("미세먼지 PM2.5 %.1f ㎍/m³ | PM10 %.1f ㎍/m³ | AQI %d (%s)\n",
-		aq.PM25,
-		aq.PM10,
-		aq.AQIUS,
-		aqiStatus(aq.AQIUS),
-	)
-
+	printSummary(loc, w, aq)
 	return nil
 }
 
+// ---------- Output ----------
+func printSummary(loc GeoResult, w Current, aq AirQualityCurrent) {
+	now := time.Now().In(time.FixedZone("KST", 9*60*60))
+
+	fmt.Printf("%s | %s (KST)\n",
+		loc.Name,
+		now.Format("01-02 15:04"),
+	)
+
+	fmt.Printf("%s  %.1f°C (체감 %.1f°C)  |  강수 %d%%\n",
+		iconForCode(w.WeatherCode),
+		w.Temperature2m,
+		w.ApparentTemperature,
+		w.PrecipProbability,
+	)
+
+	fmt.Printf("대기질 %s (AQI %d)\n",
+		aqiStatus(aq.AQIUS),
+		aq.AQIUS,
+	)
+
+	fmt.Printf("미세먼지(PM10) %s | 초미세먼지(PM2.5) %s\n",
+		pm10GradeKR(aq.PM10),
+		pm25GradeKR(aq.PM25),
+	)
+}
+
+// ---------- API ----------
 func geocode(client *http.Client, city string) (GeoResult, error) {
 	q := url.QueryEscape(city)
 	u := fmt.Sprintf("https://geocoding-api.open-meteo.com/v1/search?name=%s&count=1&language=ko&format=json", q)
@@ -116,7 +123,7 @@ func geocode(client *http.Client, city string) (GeoResult, error) {
 
 func fetchCurrentWeather(client *http.Client, lat, lon float64) (Current, error) {
 	u := fmt.Sprintf(
-		"https://api.open-meteo.com/v1/forecast?latitude=%f&longitude=%f&timezone=Asia%%2FSeoul&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation_probability,wind_speed_10m,weather_code",
+		"https://api.open-meteo.com/v1/forecast?latitude=%f&longitude=%f&timezone=Asia%%2FSeoul&current=temperature_2m,apparent_temperature,precipitation_probability,weather_code",
 		lat, lon,
 	)
 
@@ -171,21 +178,21 @@ func fail(format string, args ...any) {
 func iconForCode(code int) string {
 	switch code {
 	case 0:
-		return "☀️ 맑음"
+		return "☀️  맑음"
 	case 1, 2, 3:
-		return "☁️ 흐림"
+		return "☁️  흐림"
 	case 45, 48:
-		return "🌫️ 안개"
+		return "🌫️  안개"
 	case 51, 53, 55:
-		return "🌦️ 이슬비"
+		return "🌦️  이슬비"
 	case 61, 63, 65:
-		return "🌧️ 비"
+		return "🌧️  비"
 	case 71, 73, 75:
-		return "🌨️ 눈"
+		return "🌨️  눈"
 	case 95:
-		return "⛈️ 뇌우"
+		return "⛈️  뇌우"
 	default:
-		return "🌡️ 알 수 없음"
+		return "🌡️  알 수 없음"
 	}
 }
 
@@ -201,5 +208,34 @@ func aqiStatus(aqi int) string {
 		return "매우 나쁨 🤢"
 	default:
 		return "위험 ☠️"
+	}
+}
+
+// ---------- Korea grading (commonly used public thresholds) ----------
+// PM10 (미세먼지) ㎍/m³
+func pm10GradeKR(pm10 float64) string {
+	switch {
+	case pm10 <= 30:
+		return "좋음"
+	case pm10 <= 80:
+		return "보통"
+	case pm10 <= 150:
+		return "나쁨"
+	default:
+		return "매우 나쁨"
+	}
+}
+
+// PM2.5 (초미세먼지) ㎍/m³
+func pm25GradeKR(pm25 float64) string {
+	switch {
+	case pm25 <= 15:
+		return "좋음"
+	case pm25 <= 35:
+		return "보통"
+	case pm25 <= 75:
+		return "나쁨"
+	default:
+		return "매우 나쁨"
 	}
 }
