@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -44,7 +45,6 @@ type AirQualityCurrent struct {
 	AQIUS int     `json:"us_aqi"`
 }
 
-// RunNow: city -> lat/lon -> weather + air -> print
 func RunNow(city string) error {
 	client := &http.Client{Timeout: 8 * time.Second}
 
@@ -53,14 +53,36 @@ func RunNow(city string) error {
 		return err
 	}
 
-	w, err := fetchCurrentWeather(client, loc.Latitude, loc.Longitude)
-	if err != nil {
-		return err
-	}
+	var (
+		w  Current
+		aq AirQualityCurrent
 
-	aq, err := fetchAirQuality(client, loc.Latitude, loc.Longitude)
-	if err != nil {
-		return err
+		wErr  error
+		aqErr error
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// 날씨 병렬 호출
+	go func() {
+		defer wg.Done()
+		w, wErr = fetchCurrentWeather(client, loc.Latitude, loc.Longitude)
+	}()
+
+	// 공기질 병렬 호출
+	go func() {
+		defer wg.Done()
+		aq, aqErr = fetchAirQuality(client, loc.Latitude, loc.Longitude)
+	}()
+
+	wg.Wait()
+
+	if wErr != nil {
+		return wErr
+	}
+	if aqErr != nil {
+		return aqErr
 	}
 
 	printSummary(loc, w, aq)
